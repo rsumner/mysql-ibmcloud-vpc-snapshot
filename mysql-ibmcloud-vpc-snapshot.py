@@ -47,10 +47,6 @@ os.sync()
 logging.info("Flushed OS filesystem IOPS")
 
 try:
-    snap_prototype = {}
-    snap_prototype['name'] = SNAP_NAME
-    snap_prototype['source_volume'] = {}
-    snap_prototype['source_volume']['id'] = BLOCK_VOLUME_ID
     snapshot = ibm_service.create_snapshot(snapshot_prototype={
         'name': SNAP_NAME + '-' + datetime.now().strftime('%Y%m%d%H%M'),
         'source_volume': {'id': BLOCK_VOLUME_ID}
