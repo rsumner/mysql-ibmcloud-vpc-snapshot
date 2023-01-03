@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 import logging
 import mysql.connector
@@ -16,10 +17,11 @@ MYSQL_PWD = os.getenv('MYSQL_PWD') or sys.exit('MYSQL_PWD env variable is requir
 MYSQL_USER = os.getenv('MYSQL_USER', default=os.getenv('USER'))
 LOG_LEVEL = os.getenv('LOG_LEVEL', default='INFO')
 BLOCK_VOLUME_ID = os.getenv('BLOCK_VOLUME_ID') or sys.exit('BLOCK_VOLUME_ID env variable is required')
+MOUNT_POINT = os.getenv('MOUNT_POINT') or sys.exit('MOUNT_POINT env variable is required')
 SNAP_NAME = os.getenv('SNAP_NAME', default='my-snap')
 STOP_REPLICA = os.getenv('STOP_REPLICA', default=False)
 
-logging.basicConfig(level=getattr(logging, LOG_LEVEL))
+logging.basicConfig(level=getattr(logging, LOG_LEVEL), format='%(asctime)s %(levelname)s: %(message)s')
 
 ibm_iam = IAMAuthenticator(IBMCLOUD_API_KEY)
 ibm_service = VpcV1(authenticator=ibm_iam)
@@ -28,7 +30,6 @@ ibm_service = VpcV1(authenticator=ibm_iam)
 try:
     block_volume = ibm_service.get_volume(id=BLOCK_VOLUME_ID).get_result()
     logging.debug(block_volume)
-    logging.info("Confirmed block volume exist")
 except ApiException as e:
   sys.exit("API call to get block volume failed " + str(e.code) + ": " + e.message)
 
@@ -38,21 +39,27 @@ mysql_connection = mysql.connector.connect(user=MYSQL_USER, password=MYSQL_PWD,
 mysql_cursor = mysql_connection.cursor()
 if(STOP_REPLICA):
     mysql_cursor.execute('STOP SLAVE')
-    logging.info("Stopped MySQL replica slave thread")
+    mysql_cursor.execute('SHOW SLAVE STATUS')
+    slave_status = dict(zip(mysql_cursor.column_names, mysql_cursor.fetchone()))
+    logging.info("Stopped MySQL slave thread. Dumping current slave status")
+    logging.info(slave_status)
 mysql_cursor.execute('FLUSH TABLES WITH READ LOCK')
-logging.info("Flushed MySQL tables and created read lock")
 os.sync()
 os.sync()
 os.sync()
-logging.info("Flushed OS filesystem IOPS")
+subprocess.run(["/usr/sbin/xfs_freeze", "-f", MOUNT_POINT])
 
 try:
+    snap_prototype = {}
+    snap_prototype['name'] = SNAP_NAME
+    snap_prototype['source_volume'] = {}
+    snap_prototype['source_volume']['id'] = BLOCK_VOLUME_ID
     snapshot = ibm_service.create_snapshot(snapshot_prototype={
         'name': SNAP_NAME + '-' + datetime.now().strftime('%Y%m%d%H%M'),
         'source_volume': {'id': BLOCK_VOLUME_ID}
     }).get_result()
     logging.debug(snapshot)
-    logging.info('Created VPC Block Volume snapshot id ' + snapshot['id'])
+    logging.info('Created snapshot id ' + snapshot['id'])
 except ApiException as e:
     logging.error("API call to create snapshot failed" +  str(e.code) + ": " + e.message)
 
@@ -62,17 +69,16 @@ while True:
         poll_snap = ibm_service.get_snapshot(id=snapshot['id']).get_result()
         logging.debug(poll_snap)
         if('captured_at' in poll_snap and poll_snap['captured_at']):
-            logging.info('VPC Block Volume snapshot captured_at ' + poll_snap['captured_at'])
+            logging.info('Snapshot captured_at ' + poll_snap['captured_at'])
             break
         sleep(2)
     except ApiException as e:
         logging.error("API call to get snapshot failed " + str(e.code) + ": " + e.message)
         break
 
+subprocess.run(["/usr/sbin/xfs_freeze", "-u", MOUNT_POINT])
 mysql_cursor.execute('UNLOCK TABLES')
-logging.info("Unlocked MySQL tables")
 if(STOP_REPLICA):
     mysql_cursor.execute('START SLAVE')
-    logging.info("Started MySQL replica slave thread")
 mysql_cursor.close()
 mysql_connection.close()
