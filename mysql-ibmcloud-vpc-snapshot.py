@@ -3,7 +3,8 @@ import subprocess
 import sys
 import logging
 import mysql.connector
-from time import sleep, time
+import time
+from time import sleep
 from datetime import datetime
 from dotenv import load_dotenv
 from ibm_vpc import VpcV1
@@ -20,7 +21,7 @@ BLOCK_VOLUME_ID = os.getenv('BLOCK_VOLUME_ID') or sys.exit('BLOCK_VOLUME_ID env 
 MOUNT_POINT = os.getenv('MOUNT_POINT') or sys.exit('MOUNT_POINT env variable is required')
 SNAP_NAME = os.getenv('SNAP_NAME', default='my-snap')
 STOP_REPLICA = os.getenv('STOP_REPLICA', default=False)
-SNAPSHOT_TIMEOUT = os.genenv('SNAPSHOT_TIMEOUT', default=300)
+SNAPSHOT_TIMEOUT = os.getenv('SNAPSHOT_TIMEOUT', default=300)
 
 logging.basicConfig(level=getattr(logging, LOG_LEVEL), format='%(asctime)s %(levelname)s: %(message)s')
 
