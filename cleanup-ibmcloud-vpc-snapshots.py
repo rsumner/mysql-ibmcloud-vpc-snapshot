@@ -88,7 +88,7 @@ try:
                 # and we keep everything that is less than INC_DAYS
                 logging.debug("Keeping snapshot {id} because it is only {days} days old".format(id=snapshot['id'], days=snap_delta_days))
         else:
-            logging.warn("Found snapshot {name} id:{id} that is not stable and deletable".format(snapshot['name'], snapshot['id']))
+            logging.warn("Found snapshot {name} id:{id} that is not stable and deletable".format(name=snapshot['name'], id=snapshot['id']))
 except ApiException as e:
     logging.error("API call to get snapshots failed " + str(e.code) + ": " + e.message)
 

@@ -3,7 +3,7 @@ import subprocess
 import sys
 import logging
 import mysql.connector
-from time import sleep
+from time import sleep, time
 from datetime import datetime
 from dotenv import load_dotenv
 from ibm_vpc import VpcV1
@@ -20,6 +20,7 @@ BLOCK_VOLUME_ID = os.getenv('BLOCK_VOLUME_ID') or sys.exit('BLOCK_VOLUME_ID env 
 MOUNT_POINT = os.getenv('MOUNT_POINT') or sys.exit('MOUNT_POINT env variable is required')
 SNAP_NAME = os.getenv('SNAP_NAME', default='my-snap')
 STOP_REPLICA = os.getenv('STOP_REPLICA', default=False)
+SNAPSHOT_TIMEOUT = os.genenv('SNAPSHOT_TIMEOUT', default=300)
 
 logging.basicConfig(level=getattr(logging, LOG_LEVEL), format='%(asctime)s %(levelname)s: %(message)s')
 
@@ -49,6 +50,7 @@ os.sync()
 os.sync()
 subprocess.run(["/usr/sbin/xfs_freeze", "-f", MOUNT_POINT])
 
+snapshot_created = False
 try:
     snap_prototype = {}
     snap_prototype['name'] = SNAP_NAME
@@ -60,21 +62,26 @@ try:
     }).get_result()
     logging.debug(snapshot)
     logging.info('Created snapshot id ' + snapshot['id'])
+    snapshot_created = True
 except ApiException as e:
     logging.error("API call to create snapshot failed" +  str(e.code) + ": " + e.message)
 
-# query snapshot until we have a captured_at
-while True:
-    try:
-        poll_snap = ibm_service.get_snapshot(id=snapshot['id']).get_result()
-        logging.debug(poll_snap)
-        if('captured_at' in poll_snap and poll_snap['captured_at']):
-            logging.info('Snapshot captured_at ' + poll_snap['captured_at'])
+# query snapshot until we see captured_at defined in the snapshot or we timeout first
+if snapshot_created:
+    timeout = time.time() + SNAPSHOT_TIMEOUT
+    while True:
+        try:
+            poll_snap = ibm_service.get_snapshot(id=snapshot['id']).get_result()
+            logging.debug(poll_snap)
+            if('captured_at' in poll_snap and poll_snap['captured_at']):
+                logging.info('Snapshot captured_at ' + poll_snap['captured_at'])
+                break
+            if time.time() > timeout:
+                break
+            sleep(2)
+        except ApiException as e:
+            logging.error("API call to get snapshot failed " + str(e.code) + ": " + e.message)
             break
-        sleep(2)
-    except ApiException as e:
-        logging.error("API call to get snapshot failed " + str(e.code) + ": " + e.message)
-        break
 
 subprocess.run(["/usr/sbin/xfs_freeze", "-u", MOUNT_POINT])
 mysql_cursor.execute('UNLOCK TABLES')
