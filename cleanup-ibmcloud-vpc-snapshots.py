@@ -51,7 +51,7 @@ try:
     for snapshot in snapshots:
         if snapshot['lifecycle_state'] == 'stable' and snapshot['deletable']:
             logging.debug("Found stable and deletable snapshot {snapshot[name]} id:{snapshot[id]} created at {snapshot[created_at]}".format(snapshot=snapshot))
-            snap_datetime = datetime.fromisoformat(snapshot['created_at'])
+            snap_datetime = datetime.fromisoformat(snapshot['created_at'].replace('Z', '+00:00'))
             snap_delta_days = (datetime.now(timezone.utc) - snap_datetime).days
             #logging.debug("Snapshot is {days} days old".format(days=snap_delta_days))
 
@@ -62,7 +62,7 @@ try:
             elif(snap_delta_days > INC_DAYS):
                 # we want the oldest snapshot for any given day
                 if(snap_delta_days in days):
-                    stored_snap_datetime = datetime.fromisoformat(days[snap_delta_days]['created_at'])
+                    stored_snap_datetime = datetime.fromisoformat(days[snap_delta_days]['created_at'].replace('Z', '+00:00'))
                     if(snap_datetime < stored_snap_datetime):
                         # add the old one to the delete list
                         logging.debug(

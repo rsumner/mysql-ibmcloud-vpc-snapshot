@@ -45,10 +45,12 @@ if(STOP_REPLICA):
     slave_status = dict(zip(mysql_cursor.column_names, mysql_cursor.fetchone()))
     logging.info("Stopped MySQL slave thread. Dumping current slave status")
     logging.info(slave_status)
+    logging.info("Flushing MySQL tables with READ LOCK")
 mysql_cursor.execute('FLUSH TABLES WITH READ LOCK')
 os.sync()
 os.sync()
 os.sync()
+logging.info("Freezing XFS filesystem")
 subprocess.run(["/usr/sbin/xfs_freeze", "-f", MOUNT_POINT])
 
 snapshot_created = False
@@ -84,7 +86,9 @@ if snapshot_created:
             logging.error("API call to get snapshot failed " + str(e.code) + ": " + e.message)
             break
 
+logging.info("Unfreezing XFS filesystem")
 subprocess.run(["/usr/sbin/xfs_freeze", "-u", MOUNT_POINT])
+logging.info("Unlocking MySQL tables and starting slave thread")
 mysql_cursor.execute('UNLOCK TABLES')
 if(STOP_REPLICA):
     mysql_cursor.execute('START SLAVE')
