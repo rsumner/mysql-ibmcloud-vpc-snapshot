@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 from ibm_vpc import VpcV1
+from ibm_vpc.vpc_v1 import SnapshotsPager
 from ibm_cloud_sdk_core.authenticators import IAMAuthenticator
 from ibm_cloud_sdk_core import ApiException
 from collections import OrderedDict
@@ -39,6 +40,7 @@ logging.basicConfig(level=getattr(logging, LOG_LEVEL), format='%(asctime)s %(lev
 
 ibm_iam = IAMAuthenticator(IBMCLOUD_API_KEY)
 ibm_service = VpcV1(authenticator=ibm_iam)
+#ibm_service.set_service_url("https://us-south.private.iaas.cloud.ibm.com/v1")
 
 to_delete=[]
 days = dict()
@@ -47,17 +49,22 @@ try:
     if USE_FAKE_DATA:
         snapshots = FAKE_DATA
     else:
-        snapshots = ibm_service.list_snapshots(source_volume_id=BLOCK_VOLUME_ID).get_result()['snapshots']
+        snapshots = []
+        pager = SnapshotsPager(client=ibm_service, source_volume_id=BLOCK_VOLUME_ID, limit=50)
+        while pager.has_next():
+            next_page = pager.get_next()
+            assert next_page is not None
+            snapshots.extend(next_page)
     for snapshot in snapshots:
         if snapshot['lifecycle_state'] == 'stable' and snapshot['deletable']:
             logging.debug("Found stable and deletable snapshot {snapshot[name]} id:{snapshot[id]} created at {snapshot[created_at]}".format(snapshot=snapshot))
             snap_datetime = datetime.fromisoformat(snapshot['created_at'].replace('Z', '+00:00'))
             snap_delta_days = (datetime.now(timezone.utc) - snap_datetime).days
-            #logging.debug("Snapshot is {days} days old".format(days=snap_delta_days))
+            logging.debug("Snapshot is {days} days old".format(days=snap_delta_days))
 
             # first, get rid of anything older than the DAILY_DAYS
             if(snap_delta_days > DAILY_DAYS):
-                logging.debug("Marking snapshot {id} to delete because it is older than {days} days".format(id=snapshot['id'], days=DAILY_DAYS))
+                logging.info("Marking snapshot {id} to delete because it is older than {days} days".format(id=snapshot['id'], days=DAILY_DAYS))
                 to_delete.append(snapshot['id'])     
             elif(snap_delta_days > INC_DAYS):
                 # we want the oldest snapshot for any given day
@@ -65,7 +72,7 @@ try:
                     stored_snap_datetime = datetime.fromisoformat(days[snap_delta_days]['created_at'].replace('Z', '+00:00'))
                     if(snap_datetime < stored_snap_datetime):
                         # add the old one to the delete list
-                        logging.debug(
+                        logging.info(
                             "Marking snapshot {oldid} to delete because it is older than {days} days but newer than {id}".format(
                                 oldid=days[snap_delta_days]['id'], days=INC_DAYS, id=snapshot['id']
                             )
@@ -75,7 +82,7 @@ try:
                         days[snap_delta_days] = snapshot
                     else:
                         # it's newer, so just delete this one
-                        logging.debug(
+                        logging.info(
                             "Marking snapshot {id} to delete because it is older than {days} days but newer than {oldid}".format(
                                 id=snapshot['id'], oldid=days[snap_delta_days]['id'], days=INC_DAYS
                             )
@@ -88,7 +95,7 @@ try:
                 # and we keep everything that is less than INC_DAYS
                 logging.debug("Keeping snapshot {id} because it is only {days} days old".format(id=snapshot['id'], days=snap_delta_days))
         else:
-            logging.warn("Found snapshot {name} id:{id} that is not stable and deletable".format(name=snapshot['name'], id=snapshot['id']))
+            logging.warning("Found snapshot {name} id:{id} that is not stable and deletable".format(name=snapshot['name'], id=snapshot['id']))
 except ApiException as e:
     logging.error("API call to get snapshots failed " + str(e.code) + ": " + e.message)
 
